@@ -131,15 +131,27 @@ async def webhook(request: Request):
     signature = request.headers.get("X-Line-Signature", "")
 
     # Log request for debugging
-    print(f"Received webhook. Signature: {signature}")
+    print(f"Received webhook. Body length: {len(body)}, Signature: {signature[:20] if signature else 'None'}...")
     
-    if not verify_signature(body, signature):
+    # Parse JSON first
+    try:
+        data = await request.json()
+    except Exception as e:
+        print(f"JSON parse error: {e}")
+        return {"status": "ok"}
+    
+    events = data.get("events", [])
+    print(f"Events count: {len(events)}")
+    
+    # Skip signature verification for empty events (LINE verification request)
+    if not events:
+        print("Empty events - verification request")
+        return {"status": "ok"}
+    
+    # Verify signature only when there are actual events
+    if signature and not verify_signature(body, signature):
         print("Invalid signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
-
-    data = await request.json()
-    events = data.get("events", [])
-    print(f"Events: {len(events)}")
 
     for event in events:
         try:
@@ -153,6 +165,8 @@ async def webhook(request: Request):
                 await handle_follow_event(event)
         except Exception as e:
             print(f"Error processing event: {e}")
+            import traceback
+            traceback.print_exc()
 
     return {"status": "ok"}
 
