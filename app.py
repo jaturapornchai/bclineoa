@@ -58,24 +58,45 @@ async def handle_message_event(event: dict):
         await LineService.reply_message(reply_token, "ขออภัย ตอนนี้รองรับเฉพาะข้อความตัวอักษรเท่านั้น")
         return
 
-    user_message = message["text"]
+    user_message = message["text"].strip()
 
+    # ตรวจสอบสถานะผู้ใช้
+    user = await UserRepository.get_user(user_id)
+    
+    # ถ้ายังไม่มีผู้ใช้ในระบบ ให้สร้างและขอลงทะเบียน
+    if not user:
+        profile = await LineService.get_user_profile(user_id)
+        await UserRepository.create_pending_user(
+            line_user_id=user_id,
+            display_name=profile.get("displayName") if profile else None,
+            picture_url=profile.get("pictureUrl") if profile else None
+        )
+        await LineService.reply_message(reply_token, "🔐 กรุณากรอกรหัสลงทะเบียน 4 หลักเพื่อเริ่มใช้งาน")
+        return
+    
+    # ถ้ายังไม่ได้ลงทะเบียน ให้รอรับเลข 4 หลัก
+    if not user.get("registered", False):
+        # ตรวจสอบว่าเป็นเลข 4 หลักหรือไม่
+        if user_message.isdigit() and len(user_message) == 4:
+            await UserRepository.register_user(user_id, user_message)
+            display_name = user.get("display_name", "คุณ")
+            await LineService.reply_message(reply_token, f"✅ ลงทะเบียนสำเร็จ!
+
+ยินดีต้อนรับคุณ {display_name} 🎉
+ตอนนี้คุณสามารถใช้งาน AI Chatbot ได้แล้ว
+
+พิมพ์ /clear เพื่อลบประวัติแชท")
+            return
+        else:
+            await LineService.reply_message(reply_token, "❌ กรุณากรอกรหัสเป็นตัวเลข 4 หลัก")
+            return
+
+    # ผู้ใช้ลงทะเบียนแล้ว ดำเนินการปกติ
     # ตรวจสอบคำสั่งพิเศษ
     if user_message.lower() == "/clear":
         deleted = await ChatHistoryRepository.clear_history(user_id)
         await LineService.reply_message(reply_token, f"ลบประวัติแชท {deleted} ข้อความแล้ว")
         return
-
-    # ดึง profile และลงทะเบียนผู้ใช้
-    profile = await LineService.get_user_profile(user_id)
-    if profile:
-        await UserRepository.register_user(
-            line_user_id=user_id,
-            display_name=profile.get("displayName"),
-            picture_url=profile.get("pictureUrl")
-        )
-    else:
-        await UserRepository.register_user(line_user_id=user_id)
 
     # ดึง chat history
     history = await ChatHistoryRepository.get_history(user_id, limit=10)
@@ -99,13 +120,13 @@ async def handle_follow_event(event: dict):
     profile = await LineService.get_user_profile(user_id)
     display_name = profile.get("displayName", "คุณ") if profile else "คุณ"
 
-    await UserRepository.register_user(
+    await UserRepository.create_pending_user(
         line_user_id=user_id,
         display_name=display_name,
         picture_url=profile.get("pictureUrl") if profile else None
     )
 
-    welcome_message = f"สวัสดีครับ {display_name}! 🙏\n\nยินดีต้อนรับสู่ AI Chatbot\nพิมพ์ข้อความมาได้เลยครับ ผมพร้อมช่วยเหลือคุณ\n\nพิมพ์ /clear เพื่อลบประวัติแชท"
+    welcome_message = f"สวัสดีครับ {display_name}! 🙏\n\nยินดีต้อนรับสู่ AI Chatbot\n\n🔐 กรุณากรอกรหัสลงทะเบียน 4 หลักเพื่อเริ่มใช้งาน"
     await LineService.reply_message(reply_token, welcome_message)
 
 

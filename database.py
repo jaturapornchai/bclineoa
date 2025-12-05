@@ -39,14 +39,17 @@ class UserRepository:
         return Database.get_db()[cls.collection_name]
 
     @classmethod
-    async def register_user(cls, line_user_id: str, display_name: str = None, picture_url: str = None) -> dict:
-        """ลงทะเบียนผู้ใช้ใหม่หรืออัพเดตข้อมูลผู้ใช้เดิม"""
+    async def create_pending_user(cls, line_user_id: str, display_name: str = None, picture_url: str = None) -> dict:
+        """สร้างผู้ใช้ที่รอลงทะเบียน"""
         collection = await cls.get_collection()
 
         user_data = {
             "line_user_id": line_user_id,
             "display_name": display_name,
             "picture_url": picture_url,
+            "registered": False,
+            "registration_code": None,
+            "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
 
@@ -57,6 +60,25 @@ class UserRepository:
                 "$setOnInsert": {"created_at": datetime.utcnow()}
             },
             upsert=True,
+            return_document=True
+        )
+        return result
+
+    @classmethod
+    async def register_user(cls, line_user_id: str, registration_code: str) -> dict:
+        """ลงทะเบียนผู้ใช้ด้วยเลข 4 หลัก"""
+        collection = await cls.get_collection()
+
+        result = await collection.find_one_and_update(
+            {"line_user_id": line_user_id},
+            {
+                "$set": {
+                    "registered": True,
+                    "registration_code": registration_code,
+                    "registered_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+            },
             return_document=True
         )
         return result

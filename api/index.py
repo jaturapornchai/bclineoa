@@ -26,19 +26,42 @@ def get_db():
 
 class UserRepository:
     @classmethod
-    def register_user(cls, line_user_id: str, display_name: str = None, picture_url: str = None) -> dict:
+    def create_pending_user(cls, line_user_id: str, display_name: str = None, picture_url: str = None) -> dict:
+        """สร้างผู้ใช้ที่รอลงทะเบียน"""
         db = get_db()
         collection = db["users"]
         user_data = {
             "line_user_id": line_user_id,
             "display_name": display_name,
             "picture_url": picture_url,
+            "registered": False,
+            "registration_code": None,
+            "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
         result = collection.find_one_and_update(
             {"line_user_id": line_user_id},
             {"$set": user_data, "$setOnInsert": {"created_at": datetime.utcnow()}},
             upsert=True,
+            return_document=ReturnDocument.AFTER
+        )
+        return result
+
+    @classmethod
+    def register_user(cls, line_user_id: str, registration_code: str) -> dict:
+        """ลงทะเบียนผู้ใช้ด้วยเลข 4 หลัก"""
+        db = get_db()
+        collection = db["users"]
+        result = collection.find_one_and_update(
+            {"line_user_id": line_user_id},
+            {
+                "$set": {
+                    "registered": True,
+                    "registration_code": registration_code,
+                    "registered_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+            },
             return_document=ReturnDocument.AFTER
         )
         return result
@@ -247,25 +270,40 @@ def handle_message_event(event: dict):
         LineService.reply_message(reply_token, "ขออภัย ตอนนี้รองรับเฉพาะข้อความตัวอักษรเท่านั้น")
         return
 
-    user_message = message["text"]
+    user_message = message["text"].strip()
 
+    # ตรวจสอบสถานะผู้ใช้
+    user = UserRepository.get_user(user_id)
+    
+    # ถ้ายังไม่มีผู้ใช้ในระบบ ให้สร้างและขอลงทะเบียน
+    if not user:
+        profile = LineService.get_user_profile(user_id)
+        UserRepository.create_pending_user(
+            line_user_id=user_id,
+            display_name=profile.get("displayName") if profile else None,
+            picture_url=profile.get("pictureUrl") if profile else None
+        )
+        LineService.reply_message(reply_token, "🔐 กรุณากรอกรหัสลงทะเบียน 4 หลักเพื่อเริ่มใช้งาน")
+        return
+    
+    # ถ้ายังไม่ได้ลงทะเบียน ให้รอรับเลข 4 หลัก
+    if not user.get("registered", False):
+        # ตรวจสอบว่าเป็นเลข 4 หลักหรือไม่
+        if user_message.isdigit() and len(user_message) == 4:
+            UserRepository.register_user(user_id, user_message)
+            display_name = user.get("display_name", "คุณ")
+            LineService.reply_message(reply_token, f"✅ ลงทะเบียนสำเร็จ!\n\nยินดีต้อนรับคุณ {display_name} 🎉\nตอนนี้คุณสามารถใช้งาน AI Chatbot ได้แล้ว\n\nพิมพ์ /clear เพื่อลบประวัติแชท")
+            return
+        else:
+            LineService.reply_message(reply_token, "❌ กรุณากรอกรหัสเป็นตัวเลข 4 หลัก")
+            return
+
+    # ผู้ใช้ลงทะเบียนแล้ว ดำเนินการปกติ
+    # ตรวจสอบคำสั่งพิเศษ
     if user_message.lower() == "/clear":
         deleted = ChatHistoryRepository.clear_history(user_id)
         LineService.reply_message(reply_token, f"ลบประวัติแชท {deleted} ข้อความแล้ว")
         return
-
-    # คำสั่งลงทะเบียน
-    if user_message.strip() == "ลงทะเบียน":
-        msg1 = "กรุณานำ User ID ด้านล่างนี้ไปลงทะเบียนในระบบ BC Merchant"
-        msg2 = user_id
-        LineService.reply_messages(reply_token, [msg1, msg2])
-        return
-
-    profile = LineService.get_user_profile(user_id)
-    if profile:
-        UserRepository.register_user(user_id, profile.get("displayName"), profile.get("pictureUrl"))
-    else:
-        UserRepository.register_user(user_id)
 
     history = ChatHistoryRepository.get_history(user_id, limit=10)
     ai_response = AIService.get_response(user_message, history)
@@ -282,9 +320,13 @@ def handle_follow_event(event: dict):
     profile = LineService.get_user_profile(user_id)
     display_name = profile.get("displayName", "คุณ") if profile else "คุณ"
 
-    UserRepository.register_user(user_id, display_name, profile.get("pictureUrl") if profile else None)
+    UserRepository.create_pending_user(
+        line_user_id=user_id,
+        display_name=display_name,
+        picture_url=profile.get("pictureUrl") if profile else None
+    )
 
-    welcome_message = f"สวัสดีครับ {display_name}!\n\nยินดีต้อนรับสู่ AI Chatbot\nพิมพ์ข้อความมาได้เลยครับ ผมพร้อมช่วยเหลือคุณ\n\nพิมพ์ /clear เพื่อลบประวัติแชท"
+    welcome_message = f"สวัสดีครับ {display_name}! 🙏\n\nยินดีต้อนรับสู่ AI Chatbot\n\n🔐 กรุณากรอกรหัสลงทะเบียน 4 หลักเพื่อเริ่มใช้งาน"
     LineService.reply_message(reply_token, welcome_message)
 
 
