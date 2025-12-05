@@ -4,11 +4,11 @@ import hmac
 import base64
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
-from pydantic import BaseModel
 from typing import List, Optional
 from dotenv import load_dotenv
 
-from database import Database, UserRepository, ChatHistoryRepository
+from models import PushMessageRequest, MulticastRequest, BroadcastRequest
+from database import Database, UserRepository, ChatHistoryRepository, RegistrationRepository
 from services.ai_service import AIService
 from services.line_service import LineService
 
@@ -74,24 +74,28 @@ async def handle_message_event(event: dict):
         await LineService.reply_message(reply_token, "🔐 กรุณากรอกรหัสลงทะเบียน 4 หลักเพื่อเริ่มใช้งาน")
         return
     
-    # ถ้ายังไม่ได้ลงทะเบียน ให้รอรับเลข 4 หลัก
+    # ถ้ายังไม่ได้ลงทะเบียน
     if not user.get("registered", False):
-        # ตรวจสอบว่าเป็นเลข 4 หลักหรือไม่
+        # ตรวจสอบว่าเป็นรหัสลงทะเบียน 4 หลักหรือไม่
         if user_message.isdigit() and len(user_message) == 4:
-            await UserRepository.register_user(user_id, user_message)
-            display_name = user.get("display_name", "คุณ")
-            await LineService.reply_message(reply_token, f"✅ ลงทะเบียนสำเร็จ!
-
-ยินดีต้อนรับคุณ {display_name} 🎉
-ตอนนี้คุณสามารถใช้งาน AI Chatbot ได้แล้ว
-
-พิมพ์ /clear เพื่อลบประวัติแชท")
+            claimed_reg = await RegistrationRepository.find_and_claim_registration(user_message, user_id)
+            
+            if claimed_reg:
+                # ลงทะเบียนสำเร็จ, อัปเดตข้อมูล user ในระบบเรา
+                await UserRepository.register_user(user_id, user_message)
+                display_name = user.get("display_name", "คุณ")
+                await LineService.reply_message(reply_token, f"✅ ลงทะเบียนสำเร็จ!\n\nยินดีต้อนรับคุณ {display_name} 🎉\nตอนนี้คุณสามารถใช้งาน AI Chatbot ได้แล้ว\n\nพิมพ์ /clear เพื่อลบประวัติแชท")
+            else:
+                # ไม่พบรหัส, หมดอายุ, หรือถูกใช้ไปแล้ว
+                await LineService.reply_message(reply_token, "❌ รหัสลงทะเบียนไม่ถูกต้องหรือหมดอายุ กรุณาลองอีกครั้ง")
             return
         else:
-            await LineService.reply_message(reply_token, "❌ กรุณากรอกรหัสเป็นตัวเลข 4 หลัก")
+            # ไม่ใช่เลข 4 หลัก
+            await LineService.reply_message(reply_token, "🔐 กรุณากรอกรหัสลงทะเบียน 4 หลักเพื่อเริ่มใช้งาน")
             return
 
-    # ผู้ใช้ลงทะเบียนแล้ว ดำเนินการปกติ
+    # --- ผู้ใช้ลงทะเบียนแล้ว ดำเนินการปกติ ---
+    
     # ตรวจสอบคำสั่งพิเศษ
     if user_message.lower() == "/clear":
         deleted = await ChatHistoryRepository.clear_history(user_id)
@@ -154,21 +158,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
 
 # ==================== API Endpoints สำหรับส่งข้อความ ====================
-
-class PushMessageRequest(BaseModel):
-    user_id: str
-    message: str
-
-
-class MulticastRequest(BaseModel):
-    user_ids: List[str]
-    message: str
-
-
-class BroadcastRequest(BaseModel):
-    message: str
-
-
 @app.post("/api/push")
 async def push_message(req: PushMessageRequest):
     """ส่งข้อความไปหาผู้ใช้คนเดียว"""

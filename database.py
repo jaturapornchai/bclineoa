@@ -8,6 +8,7 @@ load_dotenv()
 
 MONGODB_URI = os.getenv("MONGODB_URI")
 MONGODB_DBNAME = os.getenv("MONGODB_DBNAME", "bc_line_bot")
+SHOP_ID = os.getenv("SHOP_ID", "default_shop") # เพิ่ม shopid เริ่มต้น
 
 
 class Database:
@@ -139,3 +140,39 @@ class ChatHistoryRepository:
         collection = await cls.get_collection()
         result = await collection.delete_many({"line_user_id": line_user_id})
         return result.deleted_count
+
+
+class RegistrationRepository:
+    collection_name = "bcagent_line_registrations"
+
+    @classmethod
+    async def get_collection(cls):
+        return Database.get_db()[cls.collection_name]
+
+    @classmethod
+    async def find_and_claim_registration(cls, registration_code: str, line_user_id: str) -> Optional[dict]:
+        """
+        ค้นหารหัสลงทะเบียนที่ยังไม่หมดอายุและยังเป็น 'pending'
+        ถ้าเจอจะอัปเดตสถานะเป็น 'completed' และใส่ line_user_id
+        """
+        collection = await cls.get_collection()
+        now = datetime.utcnow().isoformat()
+
+        # Atomic operation to find and update
+        # Data is stored inside 'data' field
+        updated_doc = await collection.find_one_and_update(
+            {
+                "data.registration_code": registration_code,
+                "data.status": "pending",
+                "data.expires_at": {"$gt": now}
+            },
+            {
+                "$set": {
+                    "data.status": "completed", 
+                    "data.line_user_id": line_user_id,
+                    "data.completed_at": now
+                }
+            },
+            return_document=True # Return the document *after* update
+        )
+        return updated_doc
