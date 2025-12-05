@@ -135,24 +135,34 @@ async def handle_follow_event(event: dict):
 
 
 @app.post("/webhook")
-async def webhook(request: Request, background_tasks: BackgroundTasks):
+async def webhook(request: Request):
     """LINE Webhook endpoint"""
     body = await request.body()
     signature = request.headers.get("X-Line-Signature", "")
 
+    # Log request for debugging
+    print(f"Received webhook. Signature: {signature}")
+    
     if not verify_signature(body, signature):
+        print("Invalid signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     data = await request.json()
     events = data.get("events", [])
+    print(f"Events: {len(events)}")
 
     for event in events:
-        event_type = event.get("type")
+        try:
+            event_type = event.get("type")
+            print(f"Processing event type: {event_type}")
 
-        if event_type == "message":
-            background_tasks.add_task(handle_message_event, event)
-        elif event_type == "follow":
-            background_tasks.add_task(handle_follow_event, event)
+            if event_type == "message":
+                # Await directly instead of background_tasks for Vercel
+                await handle_message_event(event)
+            elif event_type == "follow":
+                await handle_follow_event(event)
+        except Exception as e:
+            print(f"Error processing event: {e}")
 
     return {"status": "ok"}
 
