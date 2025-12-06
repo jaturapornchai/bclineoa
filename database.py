@@ -165,10 +165,12 @@ class RegistrationRepository:
         """
         collection = await cls.get_collection()
         now = datetime.utcnow()
+        now_iso = now.isoformat()  # Convert to ISO string for comparison
 
         print(f"[DEBUG] Database: {cls.database_name}, Collection: {cls.collection_name}")
         print(f"[DEBUG] Searching registration code: {registration_code}")
         print(f"[DEBUG] Current time (UTC): {now}")
+        print(f"[DEBUG] Current time (ISO): {now_iso}")
         
         # Debug: ดูว่ามี document ไหม (ไม่สนเงื่อนไข)
         existing = await collection.find_one({"registration_code": registration_code})
@@ -177,12 +179,15 @@ class RegistrationRepository:
         if existing:
             print(f"[DEBUG] Document status: {existing.get('status')}")
             print(f"[DEBUG] Document expires_at: {existing.get('expires_at')}")
+            expires_at = existing.get('expires_at', '')
+            print(f"[DEBUG] Is expired? {expires_at} <= {now_iso} = {expires_at <= now_iso}")
         
         # ค้นหา document ที่ status=pending และยังไม่หมดอายุ
+        # expires_at เป็น ISO string ดังนั้นเปรียบเทียบ string กับ string
         query = {
             "registration_code": registration_code,
             "status": "pending",
-            "expires_at": {"$gt": now}
+            "expires_at": {"$gt": now_iso}
         }
         print(f"[DEBUG] Query: {query}")
         
@@ -195,7 +200,7 @@ class RegistrationRepository:
                     "line_user_id": line_user_id,
                     "display_name": display_name,
                     "picture_url": picture_url,
-                    "completed_at": now
+                    "completed_at": now_iso
                 }
             },
             return_document=True
