@@ -44,21 +44,20 @@ class UserRepository:
         """สร้างผู้ใช้ที่รอลงทะเบียน"""
         collection = await cls.get_collection()
 
-        user_data = {
-            "line_user_id": line_user_id,
-            "display_name": display_name,
-            "picture_url": picture_url,
-            "registered": False,
-            "registration_code": None,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
-
         result = await collection.find_one_and_update(
             {"line_user_id": line_user_id},
             {
-                "$set": user_data,
-                "$setOnInsert": {"created_at": datetime.utcnow()}
+                "$set": {
+                    "line_user_id": line_user_id,
+                    "display_name": display_name,
+                    "picture_url": picture_url,
+                    "updated_at": datetime.utcnow()
+                },
+                "$setOnInsert": {
+                    "registered": False,
+                    "registration_code": None,
+                    "created_at": datetime.utcnow()
+                }
             },
             upsert=True,
             return_document=True
