@@ -143,11 +143,14 @@ class ChatHistoryRepository:
 
 
 class RegistrationRepository:
-    collection_name = "users"  # Collection สำหรับ registration
+    """Repository สำหรับ Registration - ใช้ database bc_line_regis"""
+    database_name = "bc_line_regis"
+    collection_name = "users"
 
     @classmethod
     async def get_collection(cls):
-        return Database.get_db()[cls.collection_name]
+        # ใช้ client เดียวกันแต่คนละ database
+        return Database.client[cls.database_name][cls.collection_name]
 
     @classmethod
     async def find_and_claim_registration(
@@ -164,8 +167,17 @@ class RegistrationRepository:
         collection = await cls.get_collection()
         now = datetime.utcnow()
 
+        print(f"[DEBUG] Database: {cls.database_name}, Collection: {cls.collection_name}")
         print(f"[DEBUG] Searching registration code: {registration_code}")
-        print(f"[DEBUG] Current time: {now}")
+        print(f"[DEBUG] Current time (UTC): {now}")
+        
+        # Debug: ดูว่ามี document ไหม (ไม่สนเงื่อนไข)
+        existing = await collection.find_one({"registration_code": registration_code})
+        print(f"[DEBUG] Found document (no filter): {existing}")
+        
+        if existing:
+            print(f"[DEBUG] Document status: {existing.get('status')}")
+            print(f"[DEBUG] Document expires_at: {existing.get('expires_at')}")
         
         # ค้นหา document ที่ status=pending และยังไม่หมดอายุ
         query = {
@@ -174,10 +186,6 @@ class RegistrationRepository:
             "expires_at": {"$gt": now}
         }
         print(f"[DEBUG] Query: {query}")
-        
-        # Debug: ดูว่ามี document ไหม (ไม่สนเงื่อนไข)
-        existing = await collection.find_one({"registration_code": registration_code})
-        print(f"[DEBUG] Found document (no filter): {existing}")
         
         # Atomic find and update
         updated_doc = await collection.find_one_and_update(
