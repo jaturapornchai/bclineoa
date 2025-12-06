@@ -143,36 +143,56 @@ class ChatHistoryRepository:
 
 
 class RegistrationRepository:
-    collection_name = "bcagent_line_registrations"
+    collection_name = "users"  # Collection สำหรับ registration
 
     @classmethod
     async def get_collection(cls):
         return Database.get_db()[cls.collection_name]
 
     @classmethod
-    async def find_and_claim_registration(cls, registration_code: str, line_user_id: str) -> Optional[dict]:
+    async def find_and_claim_registration(
+        cls, 
+        registration_code: str, 
+        line_user_id: str,
+        display_name: str = None,
+        picture_url: str = None
+    ) -> Optional[dict]:
         """
-        ค้นหารหัสลงทะเบียนที่ยังไม่หมดอายุและยังเป็น 'pending'
-        ถ้าเจอจะอัปเดตสถานะเป็น 'completed' และใส่ line_user_id
+        ค้นหารหัสลงทะเบียนที่ status=pending และยังไม่หมดอายุ
+        ถ้าเจอจะอัปเดต status เป็น completed พร้อมข้อมูล LINE user
         """
         collection = await cls.get_collection()
-        now = datetime.utcnow().isoformat()
+        now = datetime.utcnow()
 
-        # Atomic operation to find and update
-        # Data is stored inside 'data' field
+        print(f"[DEBUG] Searching registration code: {registration_code}")
+        print(f"[DEBUG] Current time: {now}")
+        
+        # ค้นหา document ที่ status=pending และยังไม่หมดอายุ
+        query = {
+            "registration_code": registration_code,
+            "status": "pending",
+            "expires_at": {"$gt": now}
+        }
+        print(f"[DEBUG] Query: {query}")
+        
+        # Debug: ดูว่ามี document ไหม (ไม่สนเงื่อนไข)
+        existing = await collection.find_one({"registration_code": registration_code})
+        print(f"[DEBUG] Found document (no filter): {existing}")
+        
+        # Atomic find and update
         updated_doc = await collection.find_one_and_update(
-            {
-                "data.registration_code": registration_code,
-                "data.status": "pending",
-                "data.expires_at": {"$gt": now}
-            },
+            query,
             {
                 "$set": {
-                    "data.status": "completed", 
-                    "data.line_user_id": line_user_id,
-                    "data.completed_at": now
+                    "status": "completed",
+                    "line_user_id": line_user_id,
+                    "display_name": display_name,
+                    "picture_url": picture_url,
+                    "completed_at": now
                 }
             },
-            return_document=True # Return the document *after* update
+            return_document=True
         )
+        
+        print(f"[DEBUG] Updated doc: {updated_doc}")
         return updated_doc

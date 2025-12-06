@@ -74,15 +74,28 @@ async def handle_message_event(event: dict):
     
     # ตรวจสอบว่าเป็นรหัสลงทะเบียน 4 หลักหรือไม่ (ตรวจสอบทุกครั้งที่มีเลข 4 หลัก)
     if user_message.isdigit() and len(user_message) == 4:
-        claimed_reg = await RegistrationRepository.find_and_claim_registration(user_message, user_id)
+        # ดึง profile จาก LINE (หรือใช้ที่มีอยู่แล้ว)
+        profile = user if user else await LineService.get_user_profile(user_id)
+        display_name = profile.get("display_name") or profile.get("displayName") if profile else None
+        picture_url = profile.get("picture_url") or profile.get("pictureUrl") if profile else None
+        
+        claimed_reg = await RegistrationRepository.find_and_claim_registration(
+            registration_code=user_message, 
+            line_user_id=user_id,
+            display_name=display_name,
+            picture_url=picture_url
+        )
         
         if claimed_reg:
-            # ลงทะเบียนสำเร็จ, อัปเดตข้อมูล user ในระบบเรา
-            await UserRepository.register_user(user_id, user_message)
-            display_name = user.get("display_name", "คุณ")
-            await LineService.reply_message(reply_token, f"✅ ลงทะเบียนสำเร็จ!\n\nยินดีต้อนรับคุณ {display_name} 🎉\nตอนนี้คุณสามารถใช้งาน AI Chatbot ได้แล้ว\n\nพิมพ์ /clear เพื่อลบประวัติแชท")
+            # ลงทะเบียนสำเร็จ - ดึงชื่อร้านจาก shop object
+            shop = claimed_reg.get("shop", {})
+            shop_name = shop.get("shop_name", "ร้านค้า")
+            await LineService.reply_message(
+                reply_token, 
+                f"✅ ลงทะเบียนกับ {shop_name} สำเร็จ!\n\nยินดีต้อนรับคุณ {display_name or 'ลูกค้า'} 🎉"
+            )
             return
-        # ถ้าไม่เจอ หรือไม่ถูกต้อง ให้ถือว่าเป็นข้อความปกติ ส่งให้ AI ตอบ
+        # ถ้าไม่เจอ หรือหมดอายุ ให้ถือว่าเป็นข้อความปกติ ส่งให้ AI ตอบ
 
     # --- ดำเนินการปกติ (AI Chat) ---
     
